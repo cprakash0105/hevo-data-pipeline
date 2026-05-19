@@ -293,8 +293,9 @@ If this were a production system, I would additionally implement:
 
 ## Hevo Details
 
-- **Team ID**: [Your Hevo Team ID]
-- **Pipeline ID**: [Your Pipeline ID]
+- **Team ID**: `bt.com_3`
+- **Pipeline ID**: `3602`
+- **GitHub**: https://github.com/cprakash0105/hevo-data-pipeline
 
 ## Loom Video
 
