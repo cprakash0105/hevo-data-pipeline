@@ -299,4 +299,4 @@ If this were a production system, I would additionally implement:
 
 ## Loom Video
 
-[Link to Loom video explaining the implementation]
+https://www.loom.com/share/bd2eeee5150344ae9f774fe568fe8af6
