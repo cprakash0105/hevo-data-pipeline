@@ -1,0 +1,57 @@
+version: 2
+
+sources:
+  - name: hevo
+    description: "Raw data loaded by Hevo from PostgreSQL via logical replication"
+    schema: CP_PUBLIC
+    config:
+      freshness:
+        warn_after: {count: 24, period: hour}
+        error_after: {count: 48, period: hour}
+      loaded_at_field: "__HEVO_LOADED_AT"
+    tables:
+      - name: raw_customers
+        description: "Customer master data"
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+      - name: raw_orders
+        description: "Order transactions"
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: user_id
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('hevo', 'raw_customers')
+                    field: id
+          - name: status
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ['completed', 'returned', 'return_pending', 'shipped', 'placed']
+      - name: raw_payments
+        description: "Payment transactions linked to orders"
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: order_id
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('hevo', 'raw_orders')
+                    field: id
+          - name: payment_method
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ['credit_card', 'coupon', 'bank_transfer', 'gift_card']

@@ -1,0 +1,115 @@
+# Data Lineage
+
+## End-to-End Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           SOURCE LAYER                                       │
+│                                                                             │
+│  PostgreSQL (GCP VM, Docker)                                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                     │
+│  │raw_customers │  │ raw_orders   │  │raw_payments  │                     │
+│  │  100 rows    │  │  99 rows     │  │  113 rows    │                     │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                     │
+│         │                  │                  │                             │
+└─────────┼──────────────────┼──────────────────┼─────────────────────────────┘
+          │                  │                  │
+          │    WAL (Logical Replication)        │
+          │                  │                  │
+┌─────────┼──────────────────┼──────────────────┼─────────────────────────────┐
+│         ▼                  ▼                  ▼                             │
+│                    INGESTION LAYER                                           │
+│                                                                             │
+│  Hevo Data Pipeline (CDC via pgoutput plugin)                               │
+│  • Mode: Logical Replication                                                │
+│  • Sync: Every 5 minutes                                                    │
+│  • Load: Merge (upsert)                                                     │
+│                                                                             │
+└─────────┬──────────────────┬──────────────────┬─────────────────────────────┘
+          │                  │                  │
+          ▼                  ▼                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        RAW LAYER (Snowflake)                                 │
+│                        Schema: CP_PUBLIC                                     │
+│                                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                     │
+│  │RAW_CUSTOMERS │  │ RAW_ORDERS   │  │RAW_PAYMENTS  │                     │
+│  │              │  │              │  │              │                     │
+│  │ id           │  │ id           │  │ id           │                     │
+│  │ first_name   │  │ user_id ─────┼──┤ order_id ────┼──┐                  │
+│  │ last_name    │  │ order_date   │  │ payment_     │  │                  │
+│  │              │  │ status       │  │   method     │  │                  │
+│  │              │  │              │  │ amount       │  │                  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │                  │
+│         │                  │                  │         │ FK               │
+└─────────┼──────────────────┼──────────────────┼─────────┼──────────────────┘
+          │                  │                  │         │
+          ▼                  ▼                  ▼         │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     STAGING LAYER (dbt views)                                │
+│                     Schema: PUBLIC                                           │
+│                                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                     │
+│  │stg_customers │  │ stg_orders   │  │stg_payments  │                     │
+│  │              │  │              │  │              │                     │
+│  │ customer_id  │  │ order_id     │  │ payment_id   │                     │
+│  │ first_name   │  │ customer_id  │  │ order_id     │                     │
+│  │ last_name    │  │ order_date   │  │ payment_     │                     │
+│  │              │  │ status       │  │   method     │                     │
+│  │              │  │              │  │ amount       │                     │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                     │
+│         │                  │                  │                             │
+└─────────┼──────────────────┼──────────────────┼─────────────────────────────┘
+          │                  │                  │
+          └──────────┬───────┴──────────┬───────┘
+                     │                  │
+                     ▼                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      MARTS LAYER (dbt table)                                 │
+│                      Schema: PUBLIC                                          │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────┐               │
+│  │                     CUSTOMERS                            │               │
+│  │                                                         │               │
+│  │  customer_id            ← stg_customers.customer_id     │               │
+│  │  first_name             ← stg_customers.first_name      │               │
+│  │  last_name              ← stg_customers.last_name       │               │
+│  │  first_order            ← MIN(stg_orders.order_date)    │               │
+│  │  most_recent_order      ← MAX(stg_orders.order_date)    │               │
+│  │  number_of_orders       ← COUNT(stg_orders.order_id)    │               │
+│  │  customer_lifetime_value← SUM(stg_payments.amount)      │               │
+│  │                                                         │               │
+│  └─────────────────────────────────────────────────────────┘               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Data Quality Gates
+
+| Layer | Check | Type |
+|-------|-------|------|
+| Source | Freshness (warn: 24h, error: 48h) | SLA |
+| Source | Primary keys unique & not null | Integrity |
+| Source | Foreign keys valid (orders→customers, payments→orders) | Referential |
+| Source | Status values in accepted set | Domain |
+| Source | Payment methods in accepted set | Domain |
+| Mart | customer_id unique & not null | Integrity |
+| Mart | number_of_orders >= 0 | Range |
+| Mart | customer_lifetime_value >= 0 | Range |
+
+## Operational Considerations
+
+### Monitoring Points
+1. **Hevo Pipeline** — Monitor sync latency, event counts, failed events
+2. **Source Freshness** — `dbt source freshness` checks data staleness
+3. **dbt Tests** — Run on every deployment via CI/CD
+4. **Replication Slot Lag** — Monitor WAL lag to prevent disk bloat on source
+
+### Failure Modes & Recovery
+| Failure | Impact | Recovery |
+|---------|--------|----------|
+| Source DB down | No new data ingested | Hevo retries automatically; slot retains position |
+| Hevo pipeline failure | Data staleness | Freshness alert triggers; manual re-run |
+| Snowflake unavailable | No transformations | dbt retry in CI/CD; data buffered in Hevo |
+| dbt test failure | Bad data in mart | CI blocks deployment; investigate source |
+| Replication slot lag | Disk pressure on source | Alert on lag > threshold; increase WAL retention |

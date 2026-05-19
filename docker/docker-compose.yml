@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: hevo_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hevo_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hevo_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-hevo_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d
+      - ./data:/tmp/data
+      - pgdata:/var/lib/postgresql/data
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=4"
+      - "-c"
+      - "max_wal_senders=4"
+
+volumes:
+  pgdata:

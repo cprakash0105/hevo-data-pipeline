@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: customers
+    description: "Final customers table with order and payment aggregations. Materialized as a table for query performance."
+    columns:
+      - name: customer_id
+        description: "Primary key - unique identifier for each customer"
+        tests:
+          - unique
+          - not_null
+      - name: first_name
+        description: "Customer's first name"
+        tests:
+          - not_null
+      - name: last_name
+        description: "Customer's last name"
+        tests:
+          - not_null
+      - name: first_order
+        description: "Date of the customer's first order. NULL if customer has never ordered."
+      - name: most_recent_order
+        description: "Date of the customer's most recent order. NULL if customer has never ordered."
+      - name: number_of_orders
+        description: "Total count of orders placed by the customer"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: customer_lifetime_value
+        description: "Sum of all payment amounts made by the customer (in cents)"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
